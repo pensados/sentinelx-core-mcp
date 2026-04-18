@@ -75,6 +75,110 @@ Local development defaults:
 - MCP port: `8099`
 - upstream SentinelX Core URL: `http://127.0.0.1:8092`
 
+## Manual MCP smoke test
+
+The MCP endpoint is not a plain REST endpoint. A minimal manual test with `curl` requires:
+
+1. initialize a session
+2. send `notifications/initialized`
+3. call `tools/list` or a public tool such as `ping`
+
+### 1. Initialize a session
+
+```bash
+curl -i -X POST http://127.0.0.1:8099/mcp \
+  -H "Accept: application/json, text/event-stream" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "jsonrpc":"2.0",
+    "id":"init-1",
+    "method":"initialize",
+    "params":{
+      "protocolVersion":"2025-03-26",
+      "capabilities":{},
+      "clientInfo":{
+        "name":"curl",
+        "version":"0.1"
+      }
+    }
+  }'
+```
+
+This should return `200 OK` and a response header like:
+
+```text
+mcp-session-id: ...
+```
+
+### 2. Notify initialized
+
+Replace `TU_SESSION_ID` with the real value returned by the server:
+
+```bash
+curl -i -X POST http://127.0.0.1:8099/mcp \
+  -H "Accept: application/json, text/event-stream" \
+  -H "Content-Type: application/json" \
+  -H "mcp-session-id: TU_SESSION_ID" \
+  -d '{
+    "jsonrpc":"2.0",
+    "method":"notifications/initialized"
+  }'
+```
+
+This should return `202 Accepted`.
+
+### 3. List tools
+
+Because the response is delivered as SSE (`event: message` + `data: ...`), strip the `data:` prefix before piping to `jq`:
+
+```bash
+curl -s -X POST http://127.0.0.1:8099/mcp \
+  -H "Accept: application/json, text/event-stream" \
+  -H "Content-Type: application/json" \
+  -H "mcp-session-id: TU_SESSION_ID" \
+  -d '{
+    "jsonrpc":"2.0",
+    "id":"tools-1",
+    "method":"tools/list",
+    "params":{}
+  }' | sed -n 's/^data: //p' | jq
+```
+
+### 4. Call the public `ping` tool
+
+```bash
+curl -s -X POST http://127.0.0.1:8099/mcp \
+  -H "Accept: application/json, text/event-stream" \
+  -H "Content-Type: application/json" \
+  -H "mcp-session-id: TU_SESSION_ID" \
+  -d '{
+    "jsonrpc":"2.0",
+    "id":"call-1",
+    "method":"tools/call",
+    "params":{
+      "name":"ping",
+      "arguments":{}
+    }
+  }' | sed -n 's/^data: //p' | jq
+```
+
+### What this validates
+
+These manual tests validate that:
+
+- the MCP server is listening
+- MCP session initialization works
+- the protocol framing is correct
+- the server exposes tools correctly
+- at least one public tool call works end-to-end
+
+### Important auth note
+
+Protected MCP tools still require a real OAuth/OIDC access token accepted by the MCP layer.
+
+The internal SentinelX Core token is **not** the same as the external MCP access token.
+
+
 ## Installed paths
 
 - code: `/opt/sentinelx-core-mcp`
