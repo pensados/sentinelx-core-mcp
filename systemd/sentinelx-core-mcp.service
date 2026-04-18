@@ -1,0 +1,15 @@
+[Unit]
+Description=SentinelX Core MCP
+After=network.target sentinelx.service
+
+[Service]
+User=sentinelx
+Group=sentinelx
+WorkingDirectory=/opt/sentinelx-core-mcp
+EnvironmentFile=/etc/sentinelx-core-mcp/sentinelx-core-mcp.env
+ExecStart=/opt/sentinelx-core-mcp/.venv/bin/python /opt/sentinelx-core-mcp/app.py
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target
