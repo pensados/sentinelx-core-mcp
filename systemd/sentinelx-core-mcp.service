@@ -1,6 +1,7 @@
 [Unit]
 Description=SentinelX Core MCP
-After=network.target sentinelx.service
+After=network-online.target sentinelx.service
+Wants=network-online.target
 
 [Service]
 User=sentinelx
