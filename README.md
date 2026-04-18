@@ -20,10 +20,12 @@ Typical local development pairing:
 - SentinelX Core: `http://127.0.0.1:8092`
 - SentinelX Core MCP: `http://127.0.0.1:8099`
 
-Typical installed pairing:
+Typical installed pairing examples:
 
 - SentinelX Core: `http://127.0.0.1:8091`
 - SentinelX Core MCP: `http://127.0.0.1:8098`
+
+These are example defaults, not guaranteed free ports. Always check the actual values configured in `/etc/sentinelx/sentinelx.env` and `/etc/sentinelx-core-mcp/sentinelx-core-mcp.env`.
 
 ## Quick start
 
@@ -254,7 +256,7 @@ Check:
 ### Check the upstream core directly
 
 ```bash
-curl -s -H "Authorization: Bearer changeme" http://127.0.0.1:8091/state | jq
+curl -s -H "Authorization: Bearer changeme" http://127.0.0.1:TU_PUERTO_CORE/state | jq
 ```
 
 ## Security notes
