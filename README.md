@@ -262,6 +262,8 @@ Register the MCP URL as a GPT Action. Add `https://chatgpt.com/aip/g-*/oauth/cal
 
 For a complete end-to-end walkthrough with Keycloak — including token acquisition, Claude setup, smoke tests and troubleshooting — see [`docs/keycloak-example.md`](docs/keycloak-example.md).
 
+Not running Keycloak? See [`docs/oidc-alternatives.md`](docs/oidc-alternatives.md) for quickstart guides with Authentik, Zitadel and Zitadel Cloud.
+
 ---
 
 ## Troubleshooting
