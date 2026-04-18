@@ -238,7 +238,7 @@ However, the repository should stay portable, so the documentation treats Keyclo
 ### Where to start
 
 - for a generic overview, use this README
-- for a concrete Keycloak walkthrough, see `docs/keycloak-example.md`
+- for a concrete Keycloak walkthrough, see [`docs/keycloak-example.md`](docs/keycloak-example.md)
 
 ## Troubleshooting
 
