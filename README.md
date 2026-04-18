@@ -222,21 +222,45 @@ curl -s -X POST https://sentinelx.example.com/mcp \
 
 ## Identity provider setup
 
-Any OIDC-compatible provider works. You need:
+Any OIDC-compatible provider works: Keycloak, Auth0, Authentik, Zitadel, or your own. You need:
 
-1. A **client** configured for Authorization Code flow with PKCE
+1. A **client** configured for Authorization Code flow (interactive) or Client Credentials (machine-to-machine)
 2. **Custom scopes** matching the tools you want to expose (`sentinelx:exec`, `sentinelx:edit`, etc.)
 3. The **JWKS URI** of your provider
+4. For Claude and ChatGPT: the correct **redirect URIs** registered in the client
 
 Set these in the env file:
 
 ```env
 OIDC_ISSUER=https://your-provider.example.com/realms/your-realm
 OIDC_JWKS_URI=https://your-provider.example.com/realms/your-realm/protocol/openid-connect/certs
-OIDC_EXPECTED_AUDIENCE=   # leave empty unless your provider requires it
+OIDC_EXPECTED_AUDIENCE=   # set to your client ID, or leave empty to skip audience validation
 ```
 
-For a detailed walkthrough with Keycloak, see [`docs/keycloak-example.md`](docs/keycloak-example.md).
+### About `OIDC_EXPECTED_AUDIENCE`
+
+- Set to your **client ID** if your provider includes it in the `aud` claim (common with confidential clients)
+- Leave **empty** if unsure — the server skips audience validation
+- If tokens are rejected, decode the token (`echo $TOKEN | cut -d. -f2 | base64 -d | jq`) and check the `aud` claim
+
+### Connecting Claude
+
+Add the MCP server in Claude's settings:
+
+```
+https://sentinelx.example.com/mcp
+```
+
+Claude will redirect to your identity provider on first use. Make sure:
+
+- The redirect URI `https://claude.ai/api/mcp/auth_callback` is registered in your OIDC client
+- Your server exposes `/.well-known/oauth-protected-resource` with the correct `authorization_servers` value
+
+### Connecting ChatGPT
+
+Register the MCP URL as a GPT Action. Add `https://chatgpt.com/aip/g-*/oauth/callback` to your client's redirect URIs.
+
+For a complete end-to-end walkthrough with Keycloak — including token acquisition, Claude setup, smoke tests and troubleshooting — see [`docs/keycloak-example.md`](docs/keycloak-example.md).
 
 ---
 

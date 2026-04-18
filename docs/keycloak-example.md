@@ -1,86 +1,107 @@
 # Keycloak example for SentinelX Core MCP
 
-This document shows one practical way to configure Keycloak as the OIDC provider for `sentinelx-core-mcp`.
+This document shows a practical, end-to-end walkthrough for configuring Keycloak as the OIDC provider for `sentinelx-core-mcp`.
 
-Keycloak is a **recommended example**, not a hard requirement. Any compatible OIDC provider should work if it exposes a valid issuer and JWKS endpoint.
+Keycloak is a **recommended example**, not a hard requirement. Any OIDC-compatible provider with a valid issuer and JWKS endpoint works. The mental model applies regardless of provider.
 
-## Goal
+---
 
-The goal is to protect the MCP layer with real bearer access tokens while keeping the upstream `sentinelx-core` protected separately by its own internal token.
+## What you'll end up with
 
-That gives you two boundaries:
+```
+Claude / ChatGPT / curl
+        │
+        │  OAuth Bearer token  (issued by Keycloak)
+        ▼
+sentinelx-core-mcp          ← validates JWT via Keycloak JWKS
+        │
+        │  internal Bearer token  (SENTINELX_TOKEN)
+        ▼
+sentinelx-core              ← local agent, allowlisted commands
+```
 
-- MCP client -> `sentinelx-core-mcp` using OAuth/OIDC
-- `sentinelx-core-mcp` -> `sentinelx-core` using `SENTINELX_TOKEN`
+Two independent auth boundaries. The OIDC layer is for external clients. The internal token never leaves the server.
 
-## High-level model
+---
 
-- Keycloak realm: `sentinelx`
-- MCP OIDC issuer example: `https://auth.example.com/realms/sentinelx`
-- MCP JWKS example: `https://auth.example.com/realms/sentinelx/protocol/openid-connect/certs`
-- MCP resource URL example: `https://sentinelx.example.com`
+## Prerequisites
+
+- A running Keycloak instance (self-hosted or cloud)
+- `sentinelx-core` installed and running
+- `sentinelx-core-mcp` installed
+- A domain with HTTPS for the MCP endpoint (e.g. `https://sentinelx.example.com`)
+
+---
 
 ## 1. Create a realm
 
-In Keycloak, create a realm such as:
+In the Keycloak admin console, create a dedicated realm:
 
-```text
+```
 sentinelx
 ```
 
-## 2. Create a client for MCP access
+Using a dedicated realm keeps the MCP client isolated from other applications in your Keycloak instance.
 
-Create a client dedicated to the MCP layer.
+Your OIDC issuer will be:
 
-Suggested ideas:
+```
+https://auth.example.com/realms/sentinelx
+```
 
-- client id: `sentinelx-mcp`
-- protocol: `openid-connect`
-- keep the client purpose narrow
+Your JWKS URI will be:
 
-Exactly whether the client is public or confidential depends on your use case and token flow.
-For machine-to-machine or controlled backend integrations, confidential clients are often the cleaner option.
+```
+https://auth.example.com/realms/sentinelx/protocol/openid-connect/certs
+```
 
-## 2.1 Configure access settings and redirect URIs
+---
 
-In the Keycloak client access settings, configure the redirect URIs required by the MCP client you plan to use.
-The exact list depends on the client platform. The screenshot below shows an example configuration used during testing.
+## 2. Create a client
+
+Create a new client in the `sentinelx` realm.
+
+| Field | Value |
+|-------|-------|
+| Client ID | `sentinelx-mcp` |
+| Protocol | `openid-connect` |
+| Client authentication | On (confidential client) |
+| Authorization | Off |
+
+### 2.1 Access settings and redirect URIs
+
+Configure redirect URIs to match the MCP clients you want to support.
 
 ![Keycloak client access settings example](images/keycloak-client-access-settings.png)
 
-In the example above, the client includes redirect URIs for MCP-capable clients such as ChatGPT and Claude.
-Do **not** blindly copy every redirect URI from the screenshot. Keep only the URIs required by the clients you actually want to support.
+Common redirect URIs by client:
 
-Practical notes:
+| Client | Redirect URI |
+|--------|-------------|
+| Claude (claude.ai) | `https://claude.ai/api/mcp/auth_callback` |
+| ChatGPT | `https://chatgpt.com/aip/g-*/oauth/callback` |
+| Cursor | `http://localhost:*/callback`, `cursor://anysphere.cursor-deeplink/mcp/auth_callback` |
+| curl / testing | `http://localhost:9999/callback` |
 
-- `Valid redirect URIs` is the most important field for OAuth callback handling
-- `Web origins` should also be reviewed for browser-based clients
-- wildcard entries should be used carefully
-- keep the redirect list as small as possible
-- if a client fails the OAuth callback step, verify this screen first
+**Keep the list minimal.** Only include URIs for clients you actually use. Wildcards should be avoided unless required.
 
-## 2.2 Configure client credentials and authentication method
+Also set **Web origins** to `+` (mirrors valid redirect URIs) or list them explicitly if you prefer stricter control.
 
-In the Keycloak client details view, verify that the MCP client is configured with the expected authentication method and that a client secret exists when you plan to use a confidential client flow.
-The screenshot below shows an example configuration used during testing.
+### 2.2 Client credentials
+
+In the **Credentials** tab, note the client secret. You will need it to obtain tokens via the client credentials flow.
 
 ![Keycloak client token settings example](images/keycloak-token-settings.png)
 
-This screen is especially relevant when you want to authenticate external AI clients or controlled integrations through OAuth/OIDC.
-In the example above, the client is configured with `Client Id and Secret`, which is a common setup for confidential client flows.
+Use **Client Id and Secret** as the authenticator for confidential client flows.
 
-Practical notes:
+---
 
-- verify the client authenticator matches the flow you intend to use
-- if your integration expects a confidential client, confirm that the client secret is present and valid
-- rotating the secret will require updating any dependent integration that uses it
-- if token acquisition fails, this screen is one of the first places to verify
+## 3. Define client scopes
 
-## 3. Define scopes used by the MCP layer
+The MCP layer enforces per-tool scopes. Create the following as **Client Scopes** in Keycloak (type: `None`, not default):
 
-The MCP server currently expects scopes such as these:
-
-```text
+```
 sentinelx:state
 sentinelx:exec
 sentinelx:restart
@@ -91,154 +112,304 @@ sentinelx:script
 sentinelx:capabilities
 ```
 
-You should only grant the scopes you actually want the client to use.
-
-### 3.1 Example client scopes in Keycloak
-
-The screenshot below shows an example of client scopes prepared for SentinelX-related operations.
-
 ![Keycloak client scopes example](images/keycloak-client-scopes.png)
 
-Practical notes:
+Then assign the scopes you want to the `sentinelx-mcp` client under **Client Scopes → Add client scope** (set as Optional or Default depending on whether you want them included automatically).
 
-- keep the scope set minimal
-- only grant the scopes required by the MCP tools you intend to expose
-- if a protected tool fails with a missing-scope error, verify this screen and the emitted token claims
+**Recommendation:** add all as **Optional** so they are only included when explicitly requested. This gives you the most control over what each token can do.
 
-## 3.2 Roles and role mapping notes
+### 3.1 Roles (optional)
 
-Depending on your Keycloak design, you may also use realm roles or client roles as part of your overall access model.
-The screenshot below is useful as a reference when documenting or reviewing role setup.
+If your setup uses role-based access in addition to scopes, you can define client roles and map them to scope claims via mappers.
 
 ![Keycloak client roles example](images/keycloak-client-roles.png)
 
-Practical notes:
+For most SentinelX deployments, plain scopes are sufficient. Only add roles if you have a specific reason.
 
-- roles and scopes are related but not identical concepts
-- use the simplest model that matches your security needs
-- if you later add mappers or role-based policies, document clearly how they affect the token claims consumed by the MCP server
+---
 
-## 4. Configure the MCP environment
+## 4. Configure `sentinelx-core-mcp`
 
-Edit:
+Edit the environment file:
 
-```text
-/etc/sentinelx-core-mcp/sentinelx-core-mcp.env
+```bash
+sudo nano /etc/sentinelx-core-mcp/sentinelx-core-mcp.env
 ```
-
-Example:
 
 ```env
 MCP_PORT=8098
-MCP_TOKEN=
 SENTINELX_URL=http://127.0.0.1:8091
-SENTINELX_TOKEN=changeme
+SENTINELX_TOKEN=your_internal_sentinelx_token
+
 OIDC_ISSUER=https://auth.example.com/realms/sentinelx
 OIDC_JWKS_URI=https://auth.example.com/realms/sentinelx/protocol/openid-connect/certs
 OIDC_EXPECTED_AUDIENCE=sentinelx-mcp
+
 RESOURCE_URL=https://sentinelx.example.com
 AUTH_DEBUG=false
 LOG_DIR=/var/log/sentinelx-mcp
 LOG_FILE=/var/log/sentinelx-mcp/sentinelx-core-mcp.log
 ```
 
-Restart the service after changes:
+### About `OIDC_EXPECTED_AUDIENCE`
+
+This field tells the MCP server what value to expect in the `aud` claim of incoming tokens.
+
+- Set it to your **client ID** (`sentinelx-mcp`) if Keycloak includes the client ID in the `aud` claim (common with confidential clients and the `account` audience mapper).
+- Leave it **empty** if your tokens don't include a specific audience or if you're unsure — the MCP server will skip audience validation.
+- If protected tools fail with `Invalid access token`, try toggling this value and check the token claims with `AUTH_DEBUG=true`.
+
+Restart after any change:
 
 ```bash
 sudo systemctl restart sentinelx-core-mcp
 sudo systemctl status sentinelx-core-mcp
 ```
 
-## 5. Obtain a token
+---
 
-The exact way you obtain a token depends on your Keycloak client type and flow.
+## 5. Obtain an access token
 
-For example, with a confidential client and client credentials flow, you typically request a token from Keycloak's token endpoint and then use that bearer token against the MCP endpoint.
+### Option A — Client credentials flow (machine-to-machine)
 
-## 6. MCP handshake with curl
-
-Initialize a session:
+Use this for scripts, CI jobs, or any non-interactive integration.
 
 ```bash
-curl -i -X POST http://127.0.0.1:8098/mcp   -H "Accept: application/json, text/event-stream"   -H "Content-Type: application/json"   -d '{
-    "jsonrpc":"2.0",
-    "id":"init-1",
-    "method":"initialize",
-    "params":{
-      "protocolVersion":"2025-03-26",
-      "capabilities":{},
-      "clientInfo":{
-        "name":"curl",
-        "version":"0.1"
-      }
-    }
-  }'
+TOKEN=$(curl -s -X POST \
+  https://auth.example.com/realms/sentinelx/protocol/openid-connect/token \
+  -H "Content-Type: application/x-www-form-urlencoded" \
+  -d "grant_type=client_credentials" \
+  -d "client_id=sentinelx-mcp" \
+  -d "client_secret=YOUR_CLIENT_SECRET" \
+  -d "scope=sentinelx:exec sentinelx:state sentinelx:capabilities" \
+  | jq -r '.access_token')
+
+echo $TOKEN
 ```
 
-Take the returned `mcp-session-id`, then notify initialized:
+Inspect the token claims to verify scopes and audience:
 
 ```bash
-curl -i -X POST http://127.0.0.1:8098/mcp   -H "Accept: application/json, text/event-stream"   -H "Content-Type: application/json"   -H "mcp-session-id: TU_SESSION_ID"   -d '{
-    "jsonrpc":"2.0",
-    "method":"notifications/initialized"
-  }'
+echo $TOKEN | cut -d. -f2 | base64 -d 2>/dev/null | jq
 ```
 
-## 7. Call a protected tool with a real access token
+### Option B — Authorization Code flow (interactive clients)
 
-Once you have a real access token from Keycloak, you can call a protected tool such as `sentinel_state`.
+Use this for Claude, ChatGPT, Cursor and other interactive MCP clients. The client handles the OAuth flow automatically — you just need Keycloak configured correctly (realm, client, scopes, redirect URIs from section 2).
+
+When the MCP client connects for the first time it will redirect to Keycloak's login page. After authentication it receives a token and uses it automatically.
+
+---
+
+## 6. Connect Claude
+
+In Claude's settings, add a new MCP server:
+
+```
+https://sentinelx.example.com/mcp
+```
+
+Claude will redirect to Keycloak for login on first use. After you authenticate, Claude will receive a token scoped to whatever you authorized and will have access to the corresponding tools.
+
+**Make sure** your Keycloak client includes this redirect URI:
+
+```
+https://claude.ai/api/mcp/auth_callback
+```
+
+And that `sentinelx.example.com` exposes the OAuth protected resource metadata at:
+
+```
+https://sentinelx.example.com/.well-known/oauth-protected-resource
+```
+
+Example nginx config for that endpoint:
+
+```nginx
+location = /.well-known/oauth-protected-resource {
+    default_type application/json;
+    return 200 '{
+      "resource": "https://sentinelx.example.com",
+      "authorization_servers": [
+        "https://auth.example.com/realms/sentinelx"
+      ],
+      "scopes_supported": [
+        "sentinelx:exec",
+        "sentinelx:edit",
+        "sentinelx:state",
+        "sentinelx:service",
+        "sentinelx:upload",
+        "sentinelx:script",
+        "sentinelx:capabilities"
+      ]
+    }';
+}
+```
+
+---
+
+## 7. Smoke test with curl
+
+A full end-to-end test from token acquisition to protected tool call.
+
+### Step 1 — Get a token
 
 ```bash
-curl -s -X POST http://127.0.0.1:8098/mcp   -H "Accept: application/json, text/event-stream"   -H "Content-Type: application/json"   -H "Authorization: Bearer TU_ACCESS_TOKEN"   -H "mcp-session-id: TU_SESSION_ID"   -d '{
-    "jsonrpc":"2.0",
-    "id":"call-state-1",
-    "method":"tools/call",
-    "params":{
-      "name":"sentinel_state",
-      "arguments":{}
+TOKEN=$(curl -s -X POST \
+  https://auth.example.com/realms/sentinelx/protocol/openid-connect/token \
+  -H "Content-Type: application/x-www-form-urlencoded" \
+  -d "grant_type=client_credentials" \
+  -d "client_id=sentinelx-mcp" \
+  -d "client_secret=YOUR_CLIENT_SECRET" \
+  -d "scope=sentinelx:exec sentinelx:state" \
+  | jq -r '.access_token')
+```
+
+### Step 2 — Initialize an MCP session
+
+```bash
+SESSION=$(curl -si -X POST https://sentinelx.example.com/mcp \
+  -H "Accept: application/json, text/event-stream" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "jsonrpc": "2.0",
+    "id": "init-1",
+    "method": "initialize",
+    "params": {
+      "protocolVersion": "2025-03-26",
+      "capabilities": {},
+      "clientInfo": {"name": "curl", "version": "0.1"}
     }
+  }' | grep -i mcp-session-id | awk '{print $2}' | tr -d '\r')
+
+echo "Session: $SESSION"
+```
+
+### Step 3 — Notify initialized
+
+```bash
+curl -s -X POST https://sentinelx.example.com/mcp \
+  -H "Content-Type: application/json" \
+  -H "mcp-session-id: $SESSION" \
+  -d '{"jsonrpc": "2.0", "method": "notifications/initialized"}'
+```
+
+### Step 4 — Call a public tool (no token needed)
+
+```bash
+curl -s -X POST https://sentinelx.example.com/mcp \
+  -H "Content-Type: application/json" \
+  -H "mcp-session-id: $SESSION" \
+  -d '{
+    "jsonrpc": "2.0",
+    "id": "ping-1",
+    "method": "tools/call",
+    "params": {"name": "ping", "arguments": {}}
   }' | sed -n 's/^data: //p' | jq
 ```
 
-If the token is valid and includes the required scope, the call should succeed.
-If the scope is missing, the MCP layer should reject the request.
+### Step 5 — Call a protected tool with the token
+
+```bash
+curl -s -X POST https://sentinelx.example.com/mcp \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "mcp-session-id: $SESSION" \
+  -d '{
+    "jsonrpc": "2.0",
+    "id": "exec-1",
+    "method": "tools/call",
+    "params": {"name": "sentinel_exec", "arguments": {"cmd": "uptime"}}
+  }' | sed -n 's/^data: //p' | jq
+```
+
+Expected: `{"output": "...", "returncode": 0, ...}`
+
+If the token is missing the required scope, the MCP layer returns a `PermissionError`.
+
+---
 
 ## 8. Troubleshooting
 
-### Token rejected
+### Token rejected — `Invalid access token`
 
-Check:
+```bash
+# 1. Enable debug logging temporarily
+sudo sed -i 's/AUTH_DEBUG=false/AUTH_DEBUG=true/' /etc/sentinelx-core-mcp/sentinelx-core-mcp.env
+sudo systemctl restart sentinelx-core-mcp
 
-- `OIDC_ISSUER` is correct
-- `OIDC_JWKS_URI` is correct
-- `OIDC_EXPECTED_AUDIENCE` matches what Keycloak emits
-- the token includes the expected scope
-- the token is not expired
+# 2. Make a request and check the logs
+sudo tail -f /var/log/sentinelx-mcp/sentinelx-core-mcp.log
 
-### MCP works for `ping` but protected tools fail
+# 3. Decode the token manually and inspect claims
+echo $TOKEN | cut -d. -f2 | base64 -d 2>/dev/null | jq '{iss, aud, scope: .scope, exp}'
 
-That usually means:
+# 4. Disable debug when done
+sudo sed -i 's/AUTH_DEBUG=true/AUTH_DEBUG=false/' /etc/sentinelx-core-mcp/sentinelx-core-mcp.env
+sudo systemctl restart sentinelx-core-mcp
+```
 
-- MCP transport is fine
-- session handling is fine
-- the problem is auth or scope enforcement
+Common causes:
+
+| Symptom | Likely cause | Fix |
+|---------|-------------|-----|
+| `Invalid issuer` | `OIDC_ISSUER` mismatch | Check the `iss` claim in the token vs the env value |
+| `Invalid audience` | `OIDC_EXPECTED_AUDIENCE` mismatch | Check the `aud` claim or leave the env value empty |
+| `Signature verification failed` | Wrong JWKS URI | Verify `OIDC_JWKS_URI` resolves correctly |
+| Token expired | Client not refreshing | Re-acquire the token |
+
+### `ping` works but protected tools fail
+
+The MCP transport and session are fine. The issue is auth or scope:
+
+1. Verify the token includes the required scope (check the `scope` claim)
+2. Verify `OIDC_EXPECTED_AUDIENCE` is correct or empty
+3. Enable `AUTH_DEBUG=true` and re-run to see detailed validation output
+
+### Scope missing from token
+
+In Keycloak, verify:
+
+- The scope exists as a Client Scope
+- The scope is assigned to the `sentinelx-mcp` client
+- The scope was included in the token request (`-d "scope=sentinelx:exec ..."`)
+- The scope mapper is configured to include the scope in the token (not just in the userinfo endpoint)
 
 ### Protected MCP call works but the upstream action fails
 
-That usually means the problem is no longer OIDC. Instead check:
+The OIDC layer is fine. Check the upstream:
 
-- `SENTINELX_URL`
-- `SENTINELX_TOKEN`
-- the upstream `sentinelx-core` status
-- allowlists or permissions enforced by the upstream core
+```bash
+# Verify sentinelx-core is running
+sudo systemctl status sentinelx
 
-## Final recommendation
+# Check the internal token matches
+grep SENTINELX_TOKEN /etc/sentinelx-core-mcp/sentinelx-core-mcp.env
+grep SENTINEL_TOKEN /etc/sentinelx/sentinelx.env
 
-Use Keycloak as a known-good example if you already run it or want a tested reference.
-If you prefer another OIDC provider, keep the same mental model:
+# Test the upstream directly
+curl -s -H "Authorization: Bearer YOUR_INTERNAL_TOKEN" \
+  http://127.0.0.1:8091/state | jq
+```
 
-- valid issuer
-- valid JWKS endpoint
-- minimal scopes
-- narrow client purpose
-- separate upstream SentinelX Core token
+### Claude shows auth error after connecting
+
+1. Verify the redirect URI `https://claude.ai/api/mcp/auth_callback` is in the Keycloak client
+2. Verify `/.well-known/oauth-protected-resource` returns valid JSON with the correct `authorization_servers` value
+3. Check `RESOURCE_URL` in the env matches the domain Claude is connecting to
+
+---
+
+## Summary
+
+| Step | What you configure | Where |
+|------|-------------------|-------|
+| 1 | Realm | Keycloak admin |
+| 2 | Client + redirect URIs | Keycloak admin |
+| 3 | Client scopes | Keycloak admin |
+| 4 | OIDC env vars | `/etc/sentinelx-core-mcp/sentinelx-core-mcp.env` |
+| 5 | Token acquisition | curl or MCP client OAuth flow |
+| 6 | Claude connection | Claude settings → Add MCP server |
+| 7 | Smoke test | curl end-to-end |
+
+Any OIDC-compatible provider follows the same pattern. Keycloak is the reference implementation used during development, but the env vars and token validation logic are provider-agnostic.
