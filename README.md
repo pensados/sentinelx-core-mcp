@@ -209,6 +209,36 @@ LOG_FILE=/var/log/sentinelx-mcp/sentinelx-core-mcp.log
 - protected tools require bearer tokens
 - tokens are validated against the configured JWKS endpoint
 - the upstream SentinelX Core still enforces its own internal bearer token and allowlists
+- Keycloak is a recommended and tested option, but it is not the only valid choice
+- any compatible OIDC provider should work if it exposes a valid issuer and JWKS endpoint
+
+## Authentication model
+
+SentinelX Core MCP is designed for OIDC/OAuth bearer tokens on the MCP layer.
+
+That means there are **two different auth layers** in a typical deployment:
+
+1. **External MCP auth**
+   - validated by `sentinelx-core-mcp`
+   - based on `OIDC_ISSUER`, `OIDC_JWKS_URI` and optional `OIDC_EXPECTED_AUDIENCE`
+   - intended for MCP clients such as ChatGPT or another MCP consumer
+
+2. **Internal SentinelX Core auth**
+   - validated by `sentinelx-core`
+   - based on `SENTINELX_TOKEN`
+   - used only by the MCP bridge when it forwards requests upstream
+
+### Recommendation
+
+For production-like deployments, use a real OIDC provider.
+
+Keycloak is a good reference implementation because it is well understood and was the original reference used for this project.
+However, the repository should stay portable, so the documentation treats Keycloak as an example, not as a hard dependency.
+
+### Where to start
+
+- for a generic overview, use this README
+- for a concrete Keycloak walkthrough, see `docs/keycloak-example.md`
 
 ## Troubleshooting
 
