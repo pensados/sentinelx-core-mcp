@@ -41,6 +41,41 @@ Suggested ideas:
 Exactly whether the client is public or confidential depends on your use case and token flow.
 For machine-to-machine or controlled backend integrations, confidential clients are often the cleaner option.
 
+## 2.1 Configure access settings and redirect URIs
+
+In the Keycloak client access settings, configure the redirect URIs required by the MCP client you plan to use.
+The exact list depends on the client platform. The screenshot below shows an example configuration used during testing.
+
+![Keycloak client access settings example](images/keycloak-client-access-settings.png)
+
+In the example above, the client includes redirect URIs for MCP-capable clients such as ChatGPT and Claude.
+Do **not** blindly copy every redirect URI from the screenshot. Keep only the URIs required by the clients you actually want to support.
+
+Practical notes:
+
+- `Valid redirect URIs` is the most important field for OAuth callback handling
+- `Web origins` should also be reviewed for browser-based clients
+- wildcard entries should be used carefully
+- keep the redirect list as small as possible
+- if a client fails the OAuth callback step, verify this screen first
+
+## 2.2 Configure client credentials and authentication method
+
+In the Keycloak client details view, verify that the MCP client is configured with the expected authentication method and that a client secret exists when you plan to use a confidential client flow.
+The screenshot below shows an example configuration used during testing.
+
+![Keycloak client token settings example](images/keycloak-token-settings.png)
+
+This screen is especially relevant when you want to authenticate external AI clients or controlled integrations through OAuth/OIDC.
+In the example above, the client is configured with `Client Id and Secret`, which is a common setup for confidential client flows.
+
+Practical notes:
+
+- verify the client authenticator matches the flow you intend to use
+- if your integration expects a confidential client, confirm that the client secret is present and valid
+- rotating the secret will require updating any dependent integration that uses it
+- if token acquisition fails, this screen is one of the first places to verify
+
 ## 3. Define scopes used by the MCP layer
 
 The MCP server currently expects scopes such as these:
@@ -57,6 +92,31 @@ sentinelx:capabilities
 ```
 
 You should only grant the scopes you actually want the client to use.
+
+### 3.1 Example client scopes in Keycloak
+
+The screenshot below shows an example of client scopes prepared for SentinelX-related operations.
+
+![Keycloak client scopes example](images/keycloak-client-scopes.png)
+
+Practical notes:
+
+- keep the scope set minimal
+- only grant the scopes required by the MCP tools you intend to expose
+- if a protected tool fails with a missing-scope error, verify this screen and the emitted token claims
+
+## 3.2 Roles and role mapping notes
+
+Depending on your Keycloak design, you may also use realm roles or client roles as part of your overall access model.
+The screenshot below is useful as a reference when documenting or reviewing role setup.
+
+![Keycloak client roles example](images/keycloak-client-roles.png)
+
+Practical notes:
+
+- roles and scopes are related but not identical concepts
+- use the simplest model that matches your security needs
+- if you later add mappers or role-based policies, document clearly how they affect the token claims consumed by the MCP server
 
 ## 4. Configure the MCP environment
 
@@ -100,10 +160,7 @@ For example, with a confidential client and client credentials flow, you typical
 Initialize a session:
 
 ```bash
-curl -i -X POST http://127.0.0.1:8098/mcp \
-  -H "Accept: application/json, text/event-stream" \
-  -H "Content-Type: application/json" \
-  -d '{
+curl -i -X POST http://127.0.0.1:8098/mcp   -H "Accept: application/json, text/event-stream"   -H "Content-Type: application/json"   -d '{
     "jsonrpc":"2.0",
     "id":"init-1",
     "method":"initialize",
@@ -121,11 +178,7 @@ curl -i -X POST http://127.0.0.1:8098/mcp \
 Take the returned `mcp-session-id`, then notify initialized:
 
 ```bash
-curl -i -X POST http://127.0.0.1:8098/mcp \
-  -H "Accept: application/json, text/event-stream" \
-  -H "Content-Type: application/json" \
-  -H "mcp-session-id: TU_SESSION_ID" \
-  -d '{
+curl -i -X POST http://127.0.0.1:8098/mcp   -H "Accept: application/json, text/event-stream"   -H "Content-Type: application/json"   -H "mcp-session-id: TU_SESSION_ID"   -d '{
     "jsonrpc":"2.0",
     "method":"notifications/initialized"
   }'
@@ -136,12 +189,7 @@ curl -i -X POST http://127.0.0.1:8098/mcp \
 Once you have a real access token from Keycloak, you can call a protected tool such as `sentinel_state`.
 
 ```bash
-curl -s -X POST http://127.0.0.1:8098/mcp \
-  -H "Accept: application/json, text/event-stream" \
-  -H "Content-Type: application/json" \
-  -H "Authorization: Bearer TU_ACCESS_TOKEN" \
-  -H "mcp-session-id: TU_SESSION_ID" \
-  -d '{
+curl -s -X POST http://127.0.0.1:8098/mcp   -H "Accept: application/json, text/event-stream"   -H "Content-Type: application/json"   -H "Authorization: Bearer TU_ACCESS_TOKEN"   -H "mcp-session-id: TU_SESSION_ID"   -d '{
     "jsonrpc":"2.0",
     "id":"call-state-1",
     "method":"tools/call",
