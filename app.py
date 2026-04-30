@@ -957,4 +957,39 @@ async def sentinel_help() -> Dict[str, Any]:
 
 
 if __name__ == "__main__":
-    mcp.run(transport="http", host="0.0.0.0", port=MCP_PORT)
+    import uvicorn
+    from starlette.middleware.base import BaseHTTPMiddleware
+    from starlette.responses import JSONResponse
+
+    class OAuthDiscoveryMiddleware(BaseHTTPMiddleware):
+        """
+        Return 401 with WWW-Authenticate on GET /mcp without Authorization.
+
+        Claude and other MCP clients do a GET /mcp to detect whether OAuth
+        is required. Without a session ID FastMCP returns 400 (Bad Request),
+        which clients interpret as "server is down". This middleware intercepts
+        that specific case and returns 401 + WWW-Authenticate so the client
+        knows to start the OAuth flow.
+        """
+        async def dispatch(self, request, call_next):
+            if (
+                request.method == "GET"
+                and request.url.path.rstrip("/") == "/mcp"
+                and not request.headers.get("authorization")
+                and not request.headers.get("mcp-session-id")
+            ):
+                return JSONResponse(
+                    status_code=401,
+                    content={"error": "unauthorized", "message": "Bearer token required"},
+                    headers={
+                        "WWW-Authenticate": (
+                            f'Bearer resource_metadata="{RESOURCE_URL}/.well-known/oauth-protected-resource"'
+                        )
+                    },
+                )
+            return await call_next(request)
+
+    app = mcp.http_app(transport="streamable-http")
+    app.add_middleware(OAuthDiscoveryMiddleware)
+    uvicorn.run(app, host="0.0.0.0", port=MCP_PORT)
+
