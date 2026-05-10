@@ -1,3 +1,19 @@
+> ## ⚠️ This repository is archived and no longer maintained
+>
+> SentinelX has evolved into a multi-host, hub-managed platform. Active
+> development happens at **[pensados/sentinelx-cloud-core](https://github.com/pensados/sentinelx-cloud-core)**
+> (Apache 2.0).
+>
+> This repo was the **MCP/OAuth bridge** between MCP clients and a
+> running SentinelX Core instance. The cloud version embeds the MCP
+> layer directly in the hub at `mcp.sentinelx.app`, so this separate
+> bridge is no longer needed. The license remains MIT — forks are
+> welcome to continue independently.
+>
+> Live product: **[sentinelx.pensa.ar](https://sentinelx.pensa.ar/)**
+
+---
+
 # SentinelX Core MCP
 
 **MCP/OAuth bridge for SentinelX Core. Exposes your server agent as MCP tools with OIDC token validation.**
